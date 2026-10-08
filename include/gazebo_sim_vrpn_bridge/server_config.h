@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <ros/node_handle.h>
+#include <json/json.h>
 #include <tf2/LinearMath/Transform.h>
 
 #include "gazebo_sim_vrpn_bridge/measurement_delay.h"
@@ -18,11 +18,9 @@ struct RobotConfig {
     tf2::Transform body_to_tracker{tf2::Transform::getIdentity()};
 };
 
-// Configuration shared by the legacy ROS adapter and the in-process Gazebo
-// adapter. Keeping model selection and measurement settings here prevents the
-// two server backends from drifting as new options are added.
+// Native Gazebo VRPN source configuration. Parsing has no ROS runtime or
+// parameter-server dependency; sample/noise/delay mathematics are unchanged.
 struct ServerConfig {
-    std::string model_states_topic{"/gazebo/model_states"};
     std::string bind_address;
     int port{3883};
     double publish_rate_hz{100.0};
@@ -46,6 +44,7 @@ struct ServerConfig {
     void validate() const;
 };
 
-ServerConfig loadServerConfig(const ros::NodeHandle& private_node);
+ServerConfig loadServerConfig(const Json::Value& document);
+Json::Value readServerConfigFile(const std::string& absolute_path);
 
 } // namespace gazebo_sim_vrpn_bridge

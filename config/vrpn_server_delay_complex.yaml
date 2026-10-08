@@ -1,7 +1,6 @@
 # Complex explicit delay experiment config. Common and per-tracker components
 # are added, then clamped to each tracker's max_delay_ms or the global limit.
 
-model_states_topic: /gazebo/model_states
 bind_address: ""
 port: 3883
 publish_rate: 120.0

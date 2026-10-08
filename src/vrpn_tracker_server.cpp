@@ -105,7 +105,8 @@ class VrpnTrackerServer::Impl {
         : config_(config), mocap_noise_(config.mocap_noise), measurement_delay_(config.delay) {
         connection_ = vrpn_create_server_connection(
             config_.port, nullptr, nullptr, config_.bind_address.empty() ? nullptr : config_.bind_address.c_str());
-        if (connection_ == nullptr) {
+        if (connection_ == nullptr || !connection_->doing_okay()) {
+            if (connection_ != nullptr) { connection_->removeReference(); connection_ = nullptr; }
             throw std::runtime_error("failed to create VRPN server connection");
         }
 
@@ -141,6 +142,22 @@ class VrpnTrackerServer::Impl {
             connection_->removeReference();
             connection_ = nullptr;
         }
+    }
+
+    bool healthy() const { return connection_ != nullptr && connection_->doing_okay(); }
+    void applyConfig(const ServerConfig& config) {
+        config.validate();
+        if (config.port != config_.port || config.bind_address != config_.bind_address)
+            throw std::runtime_error("VRPN listener binding is startup-only");
+        config_ = config;
+        mocap_noise_ = MocapNoise(config.mocap_noise);
+        measurement_delay_.reset(config.delay);
+        tracked_models_.clear();
+        tracker_names_.clear();
+        last_scan_wall_time_s_ = 0.;
+        last_sample_time_s_ = 0.;
+        have_sample_time_ = false;
+        have_wire_timestamp_source_ = false;
     }
 
     void processSnapshot(const ModelStateSnapshot& snapshot) {
@@ -491,6 +508,9 @@ void VrpnTrackerServer::publish(double send_wall_time_s) {
 void VrpnTrackerServer::mainloop() {
     impl_->mainloop();
 }
+
+void VrpnTrackerServer::applyConfig(const ServerConfig& config) { impl_->applyConfig(config); }
+bool VrpnTrackerServer::healthy() const { return impl_->healthy(); }
 
 std::size_t VrpnTrackerServer::trackedModelCount() const {
     return impl_->trackedModelCount();

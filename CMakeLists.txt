@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.16)
 project(gazebo_sim_vrpn_bridge)
 
 find_package(catkin REQUIRED COMPONENTS
-  gazebo_msgs
+  xgc2_gazebo_scene
   geometry_msgs
   roscpp
   tf2
@@ -18,11 +18,14 @@ find_package(Threads REQUIRED)
 set(CMAKE_HAVE_THREADS_LIBRARY "${Threads_FOUND}")
 find_package(VRPN REQUIRED)
 find_package(xgc2_math REQUIRED CONFIG)
+find_package(jsoncpp CONFIG REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_library(VRPN_NATIVE_SERVER_LIBRARY NAMES vrpnserver HINTS ${VRPN_INCLUDE_DIR}/../lib REQUIRED)
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES gazebo_sim_vrpn_server_core gazebo_sim_vrpn_system_plugin
-  CATKIN_DEPENDS gazebo_msgs geometry_msgs roscpp tf2 tf2_ros
+  CATKIN_DEPENDS xgc2_gazebo_scene geometry_msgs roscpp tf2 tf2_ros
 )
 
 include_directories(
@@ -34,37 +37,26 @@ include_directories(
 
 add_library(gazebo_sim_vrpn_server_core SHARED
   src/server_config.cpp
+  src/native_vrpn_extension.cpp
   src/vrpn_tracker_server.cpp
 )
-target_compile_features(gazebo_sim_vrpn_server_core PUBLIC cxx_std_14)
+target_compile_features(gazebo_sim_vrpn_server_core PUBLIC cxx_std_20)
 add_dependencies(gazebo_sim_vrpn_server_core
   ${catkin_EXPORTED_TARGETS}
 )
 target_link_libraries(gazebo_sim_vrpn_server_core
   PUBLIC
     ${catkin_LIBRARIES}
-    ${VRPN_SERVER_LIBRARIES}
+    ${VRPN_NATIVE_SERVER_LIBRARY} ${VRPN_LIBRARIES}
+    JsonCpp::JsonCpp yaml-cpp
     xgc2_math::math
     Threads::Threads
-)
-
-add_executable(gazebo_vrpn_server_node
-  src/gazebo_vrpn_server_node.cpp
-)
-target_compile_features(gazebo_vrpn_server_node PRIVATE cxx_std_14)
-
-add_dependencies(gazebo_vrpn_server_node
-  ${catkin_EXPORTED_TARGETS}
-)
-
-target_link_libraries(gazebo_vrpn_server_node
-  gazebo_sim_vrpn_server_core
 )
 
 add_library(gazebo_sim_vrpn_system_plugin SHARED
   src/gazebo_vrpn_system_plugin.cpp
 )
-target_compile_features(gazebo_sim_vrpn_system_plugin PRIVATE cxx_std_17)
+target_compile_features(gazebo_sim_vrpn_system_plugin PRIVATE cxx_std_20)
 add_dependencies(gazebo_sim_vrpn_system_plugin
   ${catkin_EXPORTED_TARGETS}
 )
@@ -77,7 +69,6 @@ target_link_libraries(gazebo_sim_vrpn_system_plugin
 install(TARGETS
   gazebo_sim_vrpn_server_core
   gazebo_sim_vrpn_system_plugin
-  gazebo_vrpn_server_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -89,10 +80,6 @@ install(DIRECTORY config launch
 
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-)
-
-catkin_install_python(PROGRAMS tools/compare_vrpn_backends.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
 if(CATKIN_ENABLE_TESTING)
@@ -117,9 +104,8 @@ if(CATKIN_ENABLE_TESTING)
     target_compile_features(gazebo_sim_vrpn_bridge_model_identity_tests PRIVATE cxx_std_14)
     target_link_libraries(gazebo_sim_vrpn_bridge_model_identity_tests gazebo_sim_vrpn_server_core)
   endif()
-  catkin_add_nosetests(test/vrpn_server_config_tests.py)
-  add_rostest(test/vrpn_auto_mapping_override_e2e.test DEPENDENCIES gazebo_vrpn_server_node)
-  add_rostest(test/vrpn_delay_e2e.test DEPENDENCIES gazebo_vrpn_server_node)
-  add_rostest(test/vrpn_protocol_e2e.test DEPENDENCIES gazebo_vrpn_server_node)
-  add_rostest(test/vrpn_system_plugin_e2e.test DEPENDENCIES gazebo_sim_vrpn_system_plugin)
+  add_executable(server_config_native_test test/server_config_native_test.cpp)
+  target_compile_features(server_config_native_test PRIVATE cxx_std_20)
+  target_link_libraries(server_config_native_test gazebo_sim_vrpn_server_core)
+  add_test(NAME vrpn_native_config COMMAND server_config_native_test ${CMAKE_CURRENT_SOURCE_DIR}/config)
 endif()

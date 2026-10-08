@@ -1,7 +1,6 @@
 # Simple explicit delay experiment config. The default vrpn_server.yaml does
 # not define delay parameters; use this file only when a fixed delay is needed.
 
-model_states_topic: /gazebo/model_states
 bind_address: ""
 port: 3883
 publish_rate: 120.0

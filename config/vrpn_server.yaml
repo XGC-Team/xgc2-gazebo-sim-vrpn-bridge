@@ -1,10 +1,5 @@
-# Gazebo-backed VRPN server defaults shared by the in-process SystemPlugin and
-# the legacy standalone ROS node. Launch arguments can override top-level
-# values; use this file mainly for robot-specific SE3 offsets.
-
-# Legacy node input only. The SystemPlugin reads ModelPtr poses directly and
-# never subscribes to this topic.
-model_states_topic: /gazebo/model_states
+# Native Gazebo VRPN source. Authored configuration is read directly by the
+# world component; no ROS parameter server controls this source.
 bind_address: ""
 port: 3883
 publish_rate: 120.0

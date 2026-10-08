@@ -11,6 +11,12 @@
 #include <vector>
 
 #include <xmlrpcpp/XmlRpcValue.h>
+#include <xmlrpcpp/XmlRpcException.h>
+#include <yaml-cpp/yaml.h>
+#include <fstream>
+#include <filesystem>
+#include <cmath>
+#include <limits>
 
 #include "gazebo_sim_vrpn_bridge/model_identity.h"
 
@@ -58,7 +64,13 @@ std::array<double, 3> toArray3(const std::vector<double>& values) {
     return {{values[0], values[1], values[2]}};
 }
 
+void ConfigFields(XmlRpc::XmlRpcValue& value,const std::string& name,std::initializer_list<const char*> fields) {
+    if(value.getType()!=XmlRpc::XmlRpcValue::TypeStruct)throw std::runtime_error(name+" must be a mapping");
+    for(auto& item:value){bool known=false;for(auto field:fields)known|=item.first==field;if(!known)throw std::runtime_error("unknown "+name+" field: "+item.first);}
+}
+
 tf2::Transform parseTransform(XmlRpc::XmlRpcValue& value, const std::string& param_name) {
+    ConfigFields(value,param_name,{"xyz","translation","rpy","rotation_rpy","quaternion"});
     if (value.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
         throw std::runtime_error(param_name + " must be a YAML mapping");
     }
@@ -139,12 +151,77 @@ DelayTimestampPolicy parseDelayTimestampPolicy(const std::string& value) {
     throw std::runtime_error("delay.timestamp_policy must be one of: send_time, sample_time");
 }
 
+// XmlRpcValue is only an in-memory legacy configuration value here. There
+// is no XMLRPC transport, NodeHandle or ROS parameter access in this domain.
+XmlRpc::XmlRpcValue configValue(const Json::Value& value, unsigned depth = 0) {
+    if (depth > 12) throw std::runtime_error("VRPN config nesting exceeds 12");
+    if (value.isBool()) return XmlRpc::XmlRpcValue(value.asBool());
+    if (value.type() == Json::intValue || value.type() == Json::uintValue) {
+        if (!value.isInt()) throw std::runtime_error("VRPN integer exceeds authored 32-bit configuration");
+        return XmlRpc::XmlRpcValue(value.asInt());
+    }
+    if (value.isDouble()) {
+        if (!std::isfinite(value.asDouble())) throw std::runtime_error("VRPN numbers must be finite");
+        return XmlRpc::XmlRpcValue(value.asDouble());
+    }
+    if (value.isString()) { if(value.asString().size()>256)throw std::runtime_error("VRPN configuration string exceeds 256 bytes"); return XmlRpc::XmlRpcValue(value.asString()); }
+    XmlRpc::XmlRpcValue result;
+    if (value.isArray()) {
+        if (value.size() > 256) throw std::runtime_error("VRPN config list exceeds 256 entries");
+        result.setSize(value.size());
+        for (Json::ArrayIndex i=0;i<value.size();++i) result[int(i)]=configValue(value[i],depth+1);
+    } else if (value.isObject()) {
+        (void)result.begin(); // establish an empty struct for authored {} mappings
+        if (value.size()>128) throw std::runtime_error("VRPN config mapping exceeds 128 entries");
+        for (const auto& name:value.getMemberNames()) result[name]=configValue(value[name],depth+1);
+    } else throw std::runtime_error("VRPN config cannot contain null values");
+    return result;
+}
+class ConfigValues {
+ public:
+    explicit ConfigValues(Json::Value value):value_(std::move(value)) {
+        if (!value_.isObject()) throw std::runtime_error("VRPN configuration must be a mapping");
+        const std::set<std::string> allowed={"bind_address","port","publish_rate","stale_timeout","scan_interval",
+            "velocity_filter_cutoff","acceleration_filter_cutoff","derivative_reset_timeout","mocap_noise_enabled",
+            "mocap_noise_seed","match_mode","trackers","enabled_trackers","default_body_to_tracker","mocap_noise",
+            "delay","auto_mapping","robots","manual_mapping","extrinsics","auto_track_known_models","delay_enabled",
+            "delay_timestamp_policy","delay_seed"};
+        for(const auto& name:value_.getMemberNames()) if(!allowed.count(name)) throw std::runtime_error("unknown VRPN configuration field: "+name);
+    }
+    bool getParam(const std::string& name,XmlRpc::XmlRpcValue& output) const {
+        if(!value_.isMember(name)) return false;
+        output=configValue(value_[name]); return true;
+    }
+    bool getParam(const std::string& name,bool& output) const {
+        if(!value_.isMember(name)) return false;
+        if(!value_[name].isBool()) throw std::runtime_error(name+" must be boolean");
+        output=value_[name].asBool();return true;
+    }
+    bool getParam(const std::string& name,int& output) const {
+        if(!value_.isMember(name))return false;
+        if((value_[name].type()!=Json::intValue && value_[name].type()!=Json::uintValue)||!value_[name].isInt())throw std::runtime_error(name+" must be a 32-bit integer");
+        output=value_[name].asInt();return true;
+    }
+    bool getParam(const std::string& name,double& output) const {
+        if(!value_.isMember(name))return false;
+        if(!value_[name].isNumeric()||!std::isfinite(value_[name].asDouble()))throw std::runtime_error(name+" must be finite numeric");
+        output=value_[name].asDouble();return true;
+    }
+    bool getParam(const std::string& name,std::string& output) const {
+        if(!value_.isMember(name))return false;
+        if(!value_[name].isString())throw std::runtime_error(name+" must be string");
+        output=value_[name].asString();return true;
+    }
+    template<class T>void param(const std::string& name,T& output,const T& fallback)const {if(!getParam(name,output))output=fallback;}
+ private:
+    Json::Value value_;
+};
+
 class ServerConfigLoader {
   public:
-    explicit ServerConfigLoader(const ros::NodeHandle& private_node) : private_node_(private_node) {}
+    explicit ServerConfigLoader(const Json::Value& private_node) : private_node_(private_node) {}
 
     ServerConfig load() {
-        private_node_.param<std::string>("model_states_topic", config_.model_states_topic, config_.model_states_topic);
         private_node_.param<std::string>("bind_address", config_.bind_address, config_.bind_address);
         private_node_.param<int>("port", config_.port, config_.port);
         private_node_.param<double>("publish_rate", config_.publish_rate_hz, config_.publish_rate_hz);
@@ -162,6 +239,10 @@ class ServerConfigLoader {
         private_node_.param<std::string>("match_mode", config_.match_mode, config_.match_mode);
 
         loadStructuredConfig();
+        // Explicit scalar operator overrides are applied after the authored
+        // structured document, preserving the launch precedence without ROS.
+        private_node_.getParam("mocap_noise_enabled", config_.mocap_noise.enabled);
+        private_node_.getParam("mocap_noise_seed", mocap_noise_seed_param_);
         applyAutoMappingOverrides();
         applyDelayOverrides();
         config_.mocap_noise.seed =
@@ -219,6 +300,7 @@ class ServerConfigLoader {
     }
 
     void parseMocapNoise(XmlRpc::XmlRpcValue& noise) {
+        ConfigFields(noise,"mocap_noise",{"enabled","position_stddev_xyz","rotation_stddev_rpy","seed"});
         if (noise.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
             throw std::runtime_error("mocap_noise must be a YAML mapping");
         }
@@ -239,6 +321,7 @@ class ServerConfigLoader {
     }
 
     void parseDelay(XmlRpc::XmlRpcValue& delay) {
+        ConfigFields(delay,"delay",{"enabled","timestamp_policy","seed","max_delay_ms","history_margin_ms","common","trackers"});
         if (delay.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
             throw std::runtime_error("delay must be a YAML mapping");
         }
@@ -290,6 +373,8 @@ class ServerConfigLoader {
 
     static void parseDelayComponent(XmlRpc::XmlRpcValue& value, const std::string& param_name,
                                     DelayComponentConfig& config) {
+        if(param_name=="delay.common")ConfigFields(value,param_name,{"base_ms","slow_stddev_ms","slow_tau_s","jitter_stddev_ms","burst_probability","burst_extra_ms"});
+        else ConfigFields(value,param_name,{"base_ms","slow_stddev_ms","slow_tau_s","jitter_stddev_ms","burst_probability","burst_extra_ms","max_delay_ms"});
         if (value.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
             throw std::runtime_error(param_name + " must be a YAML mapping");
         }
@@ -317,6 +402,7 @@ class ServerConfigLoader {
     }
 
     void parseAutoMapping(XmlRpc::XmlRpcValue& auto_mapping) {
+        ConfigFields(auto_mapping,"auto_mapping",{"enabled","include_patterns"});
         if (auto_mapping.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
             throw std::runtime_error("auto_mapping must be a YAML mapping");
         }
@@ -367,6 +453,7 @@ class ServerConfigLoader {
                 throw std::runtime_error("robots." + tracker_name + " must be a YAML mapping");
             }
 
+            ConfigFields(value,"robots."+tracker_name,{"enabled","gazebo_model_name","gazebo_model","body_to_tracker"});
             RobotConfig config;
             config.body_to_tracker = config_.default_body_to_tracker;
             if (value.hasMember("enabled")) {
@@ -422,7 +509,7 @@ class ServerConfigLoader {
         }
     }
 
-    ros::NodeHandle private_node_;
+    ConfigValues private_node_;
     ServerConfig config_;
     int mocap_noise_seed_param_{1};
 };
@@ -509,11 +596,11 @@ void ServerConfig::validate() const {
     if (match_mode != "contains" && match_mode != "exact" && match_mode != "prefix") {
         throw std::runtime_error("match_mode must be one of: contains, exact, prefix");
     }
-    if (publish_rate_hz <= 0.0) {
-        throw std::runtime_error("publish_rate must be positive");
+    if (!std::isfinite(publish_rate_hz) || publish_rate_hz < 0.1 || publish_rate_hz > 1000.) {
+        throw std::runtime_error("publish_rate must be 0.1 through 1000 Hz");
     }
-    if (scan_interval_s <= 0.0) {
-        throw std::runtime_error("scan_interval must be positive");
+    if (!std::isfinite(scan_interval_s) || scan_interval_s < 0.001 || scan_interval_s > 60.) {
+        throw std::runtime_error("scan_interval must be 0.001 through 60 seconds");
     }
     if (port <= 0 || port > 65535) {
         throw std::runtime_error("port must be in range 1..65535");
@@ -529,8 +616,42 @@ void ServerConfig::validate() const {
     configured_delay.validate(publish_rate_hz);
 }
 
-ServerConfig loadServerConfig(const ros::NodeHandle& private_node) {
-    return ServerConfigLoader(private_node).load();
+ServerConfig loadServerConfig(const Json::Value& private_node) {
+    try { return ServerConfigLoader(private_node).load(); }
+    catch(const XmlRpc::XmlRpcException& error) { throw std::runtime_error("invalid VRPN configuration type: "+error.getMessage()); }
+}
+
+namespace {
+Json::Value yamlConfigNode(const YAML::Node& node,unsigned depth,std::size_t& nodes) {
+    if(++nodes>4096)throw std::runtime_error("VRPN YAML expansion exceeds 4096 values");
+    if(depth>12)throw std::runtime_error("VRPN YAML nesting exceeds 12");
+    if(node.IsMap()) {
+        Json::Value result(Json::objectValue);
+        if(node.size()>128)throw std::runtime_error("VRPN YAML mapping exceeds 128 entries");
+        for(auto item:node){const auto key=item.first.as<std::string>();if(result.isMember(key))throw std::runtime_error("duplicate VRPN YAML field: "+key);result[key]=yamlConfigNode(item.second,depth+1,nodes);}return result;
+    }
+    if(node.IsSequence()) {
+        Json::Value result(Json::arrayValue);if(node.size()>256)throw std::runtime_error("VRPN YAML list exceeds 256 entries");
+        for(auto item:node)result.append(yamlConfigNode(item,depth+1,nodes));return result;
+    }
+    if(!node.IsScalar())throw std::runtime_error("VRPN YAML null value is unsupported");
+    const auto value=node.Scalar();
+    if(node.Tag()=="!" || node.Tag()=="tag:yaml.org,2002:str")return value;
+    if(value=="true")return true;if(value=="false")return false;
+    static const std::regex integer("^[+-]?[0-9]+$");
+    static const std::regex number(R"(^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$)");
+    if(std::regex_match(value,integer))return node.as<int>();
+    if(std::regex_match(value,number)){auto v=node.as<double>();if(!std::isfinite(v))throw std::runtime_error("VRPN YAML number must be finite");return v;}
+    return value;
+}
+}
+Json::Value readServerConfigFile(const std::string& absolute_path) {
+    if(!std::filesystem::path(absolute_path).is_absolute())throw std::runtime_error("VRPN configuration path must be explicitly absolute");
+    if(!std::filesystem::is_regular_file(absolute_path))throw std::runtime_error("VRPN configuration must be a regular authored file");
+    std::ifstream file(absolute_path,std::ios::binary);if(!file)throw std::runtime_error("cannot open authored VRPN configuration");
+    std::string document(65537,'\0');file.read(document.data(),document.size());document.resize(file.gcount());
+    if(document.size()>65536)throw std::runtime_error("VRPN configuration exceeds 64 KiB");
+    std::size_t nodes=0;auto result=yamlConfigNode(YAML::Load(document),0,nodes);loadServerConfig(result);return result;
 }
 
 } // namespace gazebo_sim_vrpn_bridge

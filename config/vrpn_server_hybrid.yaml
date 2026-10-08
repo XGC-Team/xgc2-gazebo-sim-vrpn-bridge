@@ -4,7 +4,6 @@
 # enabling measurement delay must retain the selected pose sample's source
 # timestamp; send_time is not a valid Hybrid observation timestamp.
 
-model_states_topic: /gazebo/model_states
 bind_address: 127.0.0.1
 port: 3884
 publish_rate: 120.0

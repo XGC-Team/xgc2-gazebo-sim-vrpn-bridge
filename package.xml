@@ -2,7 +2,7 @@
 <package format="2">
   <name>gazebo_sim_vrpn_bridge</name>
   <version>0.1.0</version>
-  <description>In-process and legacy Gazebo Classic pose to VRPN tracker server backends.</description>
+  <description>Native Gazebo Classic VRPN data source with world-owned configuration.</description>
 
   <maintainer email="lxk@example.com">lxk</maintainer>
   <license>BSD</license>
@@ -11,7 +11,9 @@
 
   <build_depend>gazebo_dev</build_depend>
   <build_export_depend>gazebo_dev</build_export_depend>
-  <depend>gazebo_msgs</depend>
+  <depend>xgc2_gazebo_scene</depend>
+  <depend>libjsoncpp-dev</depend>
+  <depend>yaml-cpp</depend>
   <depend>geometry_msgs</depend>
   <depend>roscpp</depend>
   <depend>tf2</depend>

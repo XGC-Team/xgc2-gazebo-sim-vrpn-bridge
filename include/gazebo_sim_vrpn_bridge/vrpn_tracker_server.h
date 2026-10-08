@@ -42,6 +42,11 @@ class VrpnTrackerServer {
     void publish(double send_wall_time_s);
     void mainloop();
 
+    // Reconfigure on the existing data owner; the VRPN listener stays bound.
+    // This explicitly resets configured measurement state, using the same
+    // seeded noise/delay and derivative-filter implementations as startup.
+    void applyConfig(const ServerConfig& config);
+    bool healthy() const;
     std::size_t trackedModelCount() const;
     bool hasTracker(const std::string& tracker_name) const;
 

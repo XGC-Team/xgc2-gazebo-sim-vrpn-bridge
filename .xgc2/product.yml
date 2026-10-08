@@ -1,9 +1,9 @@
 schema: xgc2.product.v1
 id: xgc2-gazebo-sim-vrpn-bridge
 name: XGC2 Gazebo Sim VRPN Bridge
-version: 1.1.0-26
+version: 1.1.0-27
 kind: ros1-apt
-summary: In-process Gazebo Classic pose to VRPN server with a legacy ROS fallback.
+summary: Native Gazebo Classic VRPN positioning source with world-owned configuration.
 ros:
   distro: noetic
   packages:
@@ -17,7 +17,9 @@ apt:
   depends:
   - libxgc2-math-dev (>= 0.5.6-6~focal)
   - ros-noetic-gazebo-ros
-  - ros-noetic-gazebo-msgs
+  - ros-noetic-xgc2-gazebo-sim-worlds (>= 1.4.1-4)
+  - libjsoncpp1
+  - libyaml-cpp0.6
   - ros-noetic-geometry-msgs
   - ros-noetic-roscpp
   - ros-noetic-tf2
@@ -29,9 +31,8 @@ usage:
     sudo apt install ros-noetic-xgc2-gazebo-sim-vrpn-bridge
 
     '
-  smoke_test: 'roslaunch --files gazebo_sim_vrpn_bridge vrpn_server.launch auto_track_known_models:=true
+  smoke_test: '.xgc2/scripts/check_installed_packages.sh'
 
-    '
 ownership:
   paths:
   - /opt/ros/noetic/share/gazebo_sim_vrpn_bridge
@@ -41,6 +42,7 @@ ownership:
   - /opt/ros/noetic/lib/libgazebo_sim_vrpn_system_plugin.so
 release:
   dependency_policy:
+    xgc2-gazebo-sim-scenes: rebuild
     libxgc2-math-dev: rebuild
   apt_versions:
-    focal: 1.1.0-26
+    focal: 1.1.0-27

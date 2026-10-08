@@ -43,8 +43,10 @@ grep -q "libxgc2-math-dev (>= 0.5.6-6~focal)" .xgc2/scripts/package_debs.sh
 grep -q 'copy_path "${PREFIX_ROOT}/lib/libgazebo_sim_vrpn_system_plugin.so"' .xgc2/scripts/package_debs.sh
 grep -q 'copy_path "${PREFIX_ROOT}/lib/libgazebo_sim_vrpn_server_core.so"' .xgc2/scripts/package_debs.sh
 grep -q "gazebo_sim_vrpn_bridge" package.xml
-grep -q "gazebo_vrpn_server_node" CMakeLists.txt
-grep -q "vrpn_server.launch" .xgc2/scripts/check_installed_packages.sh
+test ! -f src/gazebo_vrpn_server_node.cpp
+grep -q "native_vrpn_extension.cpp" CMakeLists.txt
+test ! -f launch/vrpn_server.launch
+grep -q "native_world.launch" .xgc2/scripts/check_installed_packages.sh
 grep -q "wire_timestamp.h" .xgc2/scripts/check_installed_packages.sh
 grep -q "vrpn_server_hybrid.yaml" .xgc2/scripts/check_installed_packages.sh
 grep -A3 '^delay:' config/vrpn_server_hybrid.yaml | grep -q 'timestamp_policy: sample_time'
