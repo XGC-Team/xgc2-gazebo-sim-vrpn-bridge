@@ -51,10 +51,14 @@ add_dependencies(gazebo_sim_vrpn_server_core
 target_link_libraries(gazebo_sim_vrpn_server_core
   PUBLIC
     ${catkin_LIBRARIES}
-    ${VRPN_NATIVE_SERVER_LIBRARY} ${VRPN_LIBRARIES}
-    ${XGC2_VRPN_JSONCPP_TARGET} yaml-cpp
+    # Resolve JSON through Focal's shared target before the VRPN archives,
+    # which also bundle JsonCpp and must not be relinked by our consumers.
+    ${XGC2_VRPN_JSONCPP_TARGET}
+    yaml-cpp
     xgc2_math::math
     Threads::Threads
+  PRIVATE
+    ${VRPN_NATIVE_SERVER_LIBRARY} ${VRPN_LIBRARIES}
 )
 
 add_library(gazebo_sim_vrpn_system_plugin SHARED
