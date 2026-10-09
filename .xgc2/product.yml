@@ -18,6 +18,7 @@ apt:
   - libxgc2-math-dev (>= 0.5.6-6~focal)
   - ros-noetic-gazebo-ros
   - ros-noetic-xgc2-gazebo-sim-worlds (>= 1.4.1-4)
+  - ros-noetic-xgc2-gazebo-scene (>= 1.4.1-19)
   - libjsoncpp1
   - libyaml-cpp0.6
   - ros-noetic-geometry-msgs
@@ -41,6 +42,8 @@ ownership:
   - /opt/ros/noetic/lib/libgazebo_sim_vrpn_server_core.so
   - /opt/ros/noetic/lib/libgazebo_sim_vrpn_system_plugin.so
 release:
+  requires:
+  - xgc2-gazebo-sim-scenes
   dependency_policy:
     xgc2-gazebo-sim-scenes: rebuild
     libxgc2-math-dev: rebuild
