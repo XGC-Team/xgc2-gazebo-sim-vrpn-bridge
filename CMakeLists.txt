@@ -19,6 +19,10 @@ set(CMAKE_HAVE_THREADS_LIBRARY "${Threads_FOUND}")
 find_package(VRPN REQUIRED)
 find_package(xgc2_math REQUIRED CONFIG)
 find_package(jsoncpp CONFIG REQUIRED)
+if(NOT TARGET jsoncpp_lib)
+  message(FATAL_ERROR "Focal jsoncpp must export its shared jsoncpp_lib target")
+endif()
+set(XGC2_VRPN_JSONCPP_TARGET jsoncpp_lib)
 find_package(yaml-cpp REQUIRED)
 find_library(VRPN_NATIVE_SERVER_LIBRARY NAMES vrpnserver HINTS ${VRPN_INCLUDE_DIR}/../lib REQUIRED)
 
@@ -48,7 +52,7 @@ target_link_libraries(gazebo_sim_vrpn_server_core
   PUBLIC
     ${catkin_LIBRARIES}
     ${VRPN_NATIVE_SERVER_LIBRARY} ${VRPN_LIBRARIES}
-    JsonCpp::JsonCpp yaml-cpp
+    ${XGC2_VRPN_JSONCPP_TARGET} yaml-cpp
     xgc2_math::math
     Threads::Threads
 )
