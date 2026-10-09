@@ -64,7 +64,7 @@ docker run --rm \
     apt-get install -y --no-install-recommends \
       libxgc2-math-dev ros-noetic-xgc2-gazebo-scene
     dpkg --compare-versions "$(dpkg-query -W -f="\${Version}" libxgc2-math-dev)" ge '0.5.6-6~focal'
-    dpkg --compare-versions "$(dpkg-query -W -f="\${Version}" ros-noetic-xgc2-gazebo-scene)" ge '1.4.1-19'
+    dpkg --compare-versions "$(dpkg-query -W -f="\${Version}" ros-noetic-xgc2-gazebo-scene)" ge '1.4.1-20'
 
     rm -rf /workspace/work/src /workspace/work/build /workspace/work/devel /workspace/work/install-root
     mkdir -p /workspace/work/src/xgc2-gazebo-sim-vrpn-bridge

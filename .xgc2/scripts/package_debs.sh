@@ -71,7 +71,7 @@ Section: misc
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: XGC2 <apt@example.com>
-Depends: libxgc2-math-dev (>= 0.5.6-6~focal), ros-noetic-gazebo-ros, ros-noetic-xgc2-gazebo-sim-worlds (>= 1.4.1-4), ros-noetic-xgc2-gazebo-scene (>= 1.4.1-19), libjsoncpp1, libyaml-cpp0.6, ros-noetic-geometry-msgs, ros-noetic-roscpp, ros-noetic-tf2, ros-noetic-tf2-ros, ros-noetic-vrpn
+Depends: libxgc2-math-dev (>= 0.5.6-6~focal), ros-noetic-gazebo-ros, ros-noetic-xgc2-gazebo-sim-worlds (>= 1.4.1-20), ros-noetic-xgc2-gazebo-scene (>= 1.4.1-20), libjsoncpp1, libyaml-cpp0.6, ros-noetic-geometry-msgs, ros-noetic-roscpp, ros-noetic-tf2, ros-noetic-tf2-ros, ros-noetic-vrpn
 Description: XGC2 in-process Gazebo Classic pose to VRPN tracker server
 EOF
 
