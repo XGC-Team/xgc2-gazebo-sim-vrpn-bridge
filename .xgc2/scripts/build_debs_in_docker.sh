@@ -56,10 +56,10 @@ docker run --rm \
     printf "deb [arch=%s signed-by=/etc/apt/keyrings/xgc2-archive-keyring.gpg] https://xgc2.apt.xiaokang.ink focal main\n" \
       "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/xgc2.list
 
-      if [[ -n "${XGC2_APT_OVERLAY_URL:-}" ]]; then
-        sed -i "s#https://xgc2.apt.xiaokang.ink#${XGC2_APT_OVERLAY_URL%/}#g" \
-          /etc/apt/sources.list.d/xgc2.list
-      fi
+    if [[ -n "${XGC2_APT_OVERLAY_URL:-}" ]]; then
+      printf "deb [arch=%s signed-by=/etc/apt/keyrings/xgc2-archive-keyring.gpg] %s focal main\n" \
+        "$(dpkg --print-architecture)" "${XGC2_APT_OVERLAY_URL%/}" >> /etc/apt/sources.list.d/xgc2.list
+    fi
     apt-get update -o Dir::Etc::sourcelist=sources.list.d/xgc2.list -o Dir::Etc::sourceparts="-"
     apt-get install -y --no-install-recommends \
       libxgc2-math-dev ros-noetic-xgc2-gazebo-scene
