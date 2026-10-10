@@ -184,13 +184,16 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
                 continue;
             }
             std::string model_name = model->GetName();
-            // Factory completion metadata is the authored public identity;
-            // native factory names are intentionally opaque and transient.
+            // RPC entity identity and ROS tracker names are distinct. Explicit
+            // model mappings retain precedence over the authored ROS namespace.
             const auto artifact = model->GetSDF();
             if (artifact && artifact->HasElement("plugin"))
                 for (auto plugin = artifact->GetElement("plugin"); plugin; plugin = plugin->GetNextElement("plugin"))
                     if (plugin->HasElement("public_entity_id")) {
                         model_name = plugin->Get<std::string>("public_entity_id");
+                        if (plugin->HasElement("ros_namespace") &&
+                            config.configured_model_to_tracker.find(model_name) == config.configured_model_to_tracker.end())
+                            model_name = plugin->Get<std::string>("ros_namespace");
                         break;
                     }
             if (config.trackerNameForGazeboModel(model_name).empty()) {
