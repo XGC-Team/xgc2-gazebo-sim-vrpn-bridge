@@ -211,7 +211,7 @@ class VrpnTrackerServer::Impl {
 
             const double age_s = send_wall_time_s - model.last_model_state_wall_time_s;
             if (age_s > config_.stale_timeout_s) {
-                ROS_WARN_THROTTLE(2.0, "[GazeboVrpnServer] Last Gazebo pose for '%s' is stale: %.3f s",
+                ROS_WARN_COND(wallLogDue(0, 2.0), "[GazeboVrpnServer] Last Gazebo pose for '%s' is stale: %.3f s",
                                   model.gazebo_model_name.c_str(), age_s);
             }
 
@@ -240,7 +240,7 @@ class VrpnTrackerServer::Impl {
 
             const int pose_status = model.tracker->report_pose(0, timestamp, position, quaternion);
             if (pose_status != 0) {
-                ROS_WARN_THROTTLE(2.0, "[GazeboVrpnServer] Failed to publish VRPN pose for '%s'",
+                ROS_WARN_COND(wallLogDue(1, 2.0), "[GazeboVrpnServer] Failed to publish VRPN pose for '%s'",
                                   model.tracker_name.c_str());
             }
 
@@ -255,7 +255,7 @@ class VrpnTrackerServer::Impl {
                 const int velocity_status = model.tracker->report_pose_velocity(
                     0, timestamp, linear_velocity, angular_velocity, sample->report_interval_s);
                 if (velocity_status != 0) {
-                    ROS_WARN_THROTTLE(2.0, "[GazeboVrpnServer] Failed to publish VRPN twist for '%s'",
+                    ROS_WARN_COND(wallLogDue(2, 2.0), "[GazeboVrpnServer] Failed to publish VRPN twist for '%s'",
                                       model.tracker_name.c_str());
                 }
             }
@@ -271,7 +271,7 @@ class VrpnTrackerServer::Impl {
                 const int acceleration_status = model.tracker->report_pose_acceleration(
                     0, timestamp, linear_acceleration, angular_acceleration, sample->report_interval_s);
                 if (acceleration_status != 0) {
-                    ROS_WARN_THROTTLE(2.0, "[GazeboVrpnServer] Failed to publish VRPN accel for '%s'",
+                    ROS_WARN_COND(wallLogDue(3, 2.0), "[GazeboVrpnServer] Failed to publish VRPN accel for '%s'",
                                       model.tracker_name.c_str());
                 }
             }
@@ -290,6 +290,16 @@ class VrpnTrackerServer::Impl {
     bool hasTracker(const std::string& tracker_name) const { return tracker_names_.count(tracker_name) != 0U; }
 
   private:
+    // This server has no ROS node. Its diagnostic cadence must not require
+    // ros::start() or a first /clock message from an independently started node.
+    bool wallLogDue(std::size_t slot, double interval) {
+        const double now = ros::WallTime::now().toSec();
+        if (next_log_at_[slot] > now) return false;
+        next_log_at_[slot] = now + interval;
+        return true;
+    }
+    std::array<double, 6> next_log_at_{};
+
     struct TrackedModel {
         std::string gazebo_model_name;
         std::string tracker_name;
@@ -335,7 +345,7 @@ class VrpnTrackerServer::Impl {
         last_scan_wall_time_s_ = snapshot.capture_wall_time_s;
 
         if (!matched_any_model) {
-            ROS_WARN_THROTTLE(2.0, "[GazeboVrpnServer] No configured tracker matched Gazebo models");
+            ROS_WARN_COND(wallLogDue(4, 2.0), "[GazeboVrpnServer] No configured tracker matched Gazebo models");
         }
     }
 
@@ -346,7 +356,7 @@ class VrpnTrackerServer::Impl {
         }
 
         if (tracker_names_.count(tracker_name) > 0U) {
-            ROS_WARN_STREAM_THROTTLE(10.0, "[GazeboVrpnServer] Ignoring Gazebo model '"
+            ROS_WARN_STREAM_COND(wallLogDue(5, 10.0), "[GazeboVrpnServer] Ignoring Gazebo model '"
                                                << gazebo_model_name << "' because tracker name '" << tracker_name
                                                << "' is already in use");
             return nullptr;

@@ -2,6 +2,8 @@
 #include "gazebo_sim_vrpn_bridge/server_config.h"
 
 #include <gtest/gtest.h>
+#include <ros/ros.h>
+#include "gazebo_sim_vrpn_bridge/vrpn_tracker_server.h"
 
 using gazebo_sim_vrpn_bridge::isCanonicalAutoTrackedModelName;
 using gazebo_sim_vrpn_bridge::ServerConfig;
@@ -61,6 +63,18 @@ TEST(TrackerSelectionMode, ExplicitModelMappingAppliesInEitherMode) {
     config.configured_model_to_tracker["scout_blue"] = "rigid_body_7";
 
     EXPECT_EQ("rigid_body_7", config.trackerNameForGazeboModel("scout_blue"));
+}
+
+TEST(NativeServerLogging, EmptyWorldDoesNotRequireRosStartOrClock) {
+    ASSERT_FALSE(ros::isStarted());
+    ServerConfig config;
+    config.port = 0;
+    config.bind_address = "127.0.0.1";
+    gazebo_sim_vrpn_bridge::VrpnTrackerServer server(config);
+    gazebo_sim_vrpn_bridge::ModelStateSnapshot snapshot;
+    snapshot.capture_wall_time_s = ros::WallTime::now().toSec();
+    EXPECT_NO_THROW(server.processSnapshot(snapshot));
+    EXPECT_NO_THROW(server.publish(snapshot.capture_wall_time_s));
 }
 
 int main(int argc, char** argv) {

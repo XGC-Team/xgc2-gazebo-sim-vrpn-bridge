@@ -80,9 +80,6 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
     void attachAuthority() {
         component_binding_ = std::make_unique<xgc2_gazebo_scene::NativeComponentBinding>(world_, "vrpn");
         try {
-            // ROS console throttling needs its local time utility initialized.
-            // This does not initialize a ROS node, transport or parameter bus.
-            if (!ros::isInitialized()) ros::Time::init();
             const auto path = std::getenv("XGC_SIM_VRPN_CONFIG");
             if (!path || !*path) throw std::runtime_error("XGC_SIM_VRPN_CONFIG must name the explicitly authored absolute YAML file");
             auto document = readServerConfigFile(path);
@@ -160,7 +157,11 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
                 native_state_->sample_sequence.store(latest_snapshot_sequence_);
             }
         } catch (const std::exception& error) {
-            ROS_ERROR_THROTTLE(2.0, "[GazeboVrpnSystemPlugin] Gazebo snapshot failed: %s", error.what());
+            const double now = ros::WallTime::now().toSec();
+            if (now >= next_snapshot_error_log_) {
+                next_snapshot_error_log_ = now + 2.0;
+                ROS_ERROR("[GazeboVrpnSystemPlugin] Gazebo snapshot failed: %s", error.what());
+            }
         }
     }
 
@@ -312,6 +313,7 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
     std::unique_ptr<xgc2_gazebo_scene::WorldExtensionBinding> extension_binding_;
     std::vector<TrackedModelHandle> tracked_models_;
     double last_scan_wall_time_s_{0.0};
+    double next_snapshot_error_log_{0.0};
     std::chrono::steady_clock::time_point next_capture_time_;
 
     std::mutex snapshot_mutex_;
