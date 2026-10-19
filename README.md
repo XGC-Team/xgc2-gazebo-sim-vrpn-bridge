@@ -55,8 +55,11 @@ containers and expanded nodes. SDK JSON never enters the sampling callback.
 VRPN reports preserve simulation source timestamps. UpdateEnd and TimeReset
 owners publish native simulation nanoseconds into an atomic cache. Captured
 pose and time are copied into one immutable snapshot; the science worker never
-reads World::SimTime. Capture-rate limiting, stale diagnostics and history
-selection retain wall time. send_time uses the latest captured simulation time;
+reads World::SimTime. Capture and report cadence (publish_rate) is defined in
+simulation time: at most one capture and one report per body per period of
+simulated time, so a low real-time factor lowers the wall-clock report rate
+instead of repeating or oversampling simulation timestamps. Stale diagnostics
+and history selection retain wall time. send_time uses the latest captured simulation time;
 sample_time uses the selected historical sample's simulation time. Delay/noise,
 seed/filter mathematics and timestamp units have not been rewritten.
 

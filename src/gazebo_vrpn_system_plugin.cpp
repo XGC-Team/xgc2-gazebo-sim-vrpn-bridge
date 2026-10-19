@@ -22,6 +22,7 @@
 #include <geometry_msgs/Pose.h>
 #include <ros/ros.h>
 
+#include "gazebo_sim_vrpn_bridge/capture_pacing.h"
 #include "gazebo_sim_vrpn_bridge/server_config.h"
 #include "gazebo_sim_vrpn_bridge/vrpn_tracker_server.h"
 
@@ -114,29 +115,22 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
             if (sampling_config_ != config) {
                 sampling_config_ = config;
                 last_scan_wall_time_s_ = 0.;
-                next_capture_time_ = {};
+                capture_pacer_.reset();
             }
             // Gazebo may update substantially faster than the requested VRPN
             // rate. Capture at the report cadence so large fleets are not
-            // copied on simulation steps that the worker cannot consume.
-            const auto capture_time = std::chrono::steady_clock::now();
-            if (next_capture_time_ != std::chrono::steady_clock::time_point{} && capture_time < next_capture_time_) {
+            // copied on simulation steps that the worker cannot consume. The
+            // cadence is simulation time: report timestamps are simulation
+            // time, so the rate must not scale with the real-time factor.
+            const auto simulation_ns = native_simulation_ns_.load(std::memory_order_acquire);
+            if (!capture_pacer_.due(simulation_ns, config->publish_rate_hz)) {
                 return;
             }
-            const auto capture_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<double>(1.0 / config->publish_rate_hz));
-            if (next_capture_time_ == std::chrono::steady_clock::time_point{}) {
-                next_capture_time_ = capture_time;
-            }
-            do {
-                next_capture_time_ += capture_period;
-            } while (next_capture_time_ <= capture_time);
 
             const double capture_wall_time_s = ros::WallTime::now().toSec();
             refreshTrackedModels(capture_wall_time_s, *config);
 
             ModelStateSnapshot snapshot;
-            const auto simulation_ns = native_simulation_ns_.load(std::memory_order_acquire);
             snapshot.sample_time_s = gazebo::common::Time(static_cast<int>(simulation_ns / 1000000000),
                 static_cast<int>(simulation_ns % 1000000000)).Double();
             snapshot.capture_wall_time_s = capture_wall_time_s;
@@ -156,6 +150,10 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
                 ++latest_snapshot_sequence_;
                 native_state_->sample_sequence.store(latest_snapshot_sequence_);
             }
+            // Wake the worker so each captured sample is reported without
+            // waiting for its wall-clock service tick.
+            { std::lock_guard<std::mutex> lock(native_state_->mutex); }
+            native_state_->changed.notify_all();
         } catch (const std::exception& error) {
             const double now = ros::WallTime::now().toSec();
             if (now >= next_snapshot_error_log_) {
@@ -217,7 +215,7 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
             }
             component_binding_->Ready();
             native_state_->changed.notify_all();
-            auto next_cycle = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point next_cycle;
             std::uint64_t processed_sequence = 0;
 
             while (!stopping_.load(std::memory_order_acquire) && !native_state_->stopped.load()) {
@@ -254,22 +252,25 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
                     }
                 }
 
+                // One report per captured simulation-time sample. Re-publishing
+                // between samples (the wall tick below only services the VRPN
+                // connection) would repeat a simulation timestamp, which at a
+                // low real-time factor is a different pose under the same stamp.
                 if (have_snapshot) {
                     server.processSnapshot(snapshot);
+                    server.publish(ros::WallTime::now().toSec());
                 }
-                server.publish(ros::WallTime::now().toSec());
                 server.mainloop();
                 native_state_->tracked_models.store(server.trackedModelCount());
                 if (!server.healthy()) throw std::runtime_error("VRPN native listener failed");
 
-                next_cycle += period;
-                const auto now = std::chrono::steady_clock::now();
-                if (next_cycle + period < now) {
-                    next_cycle = now + period;
-                }
+                // Wake on the next captured sample; otherwise service the VRPN
+                // connection at the report period (wall time).
+                next_cycle = std::chrono::steady_clock::now() + period;
                 std::unique_lock<std::mutex> lock(native_state_->mutex);
-                native_state_->changed.wait_until(lock, next_cycle, [this] {
-                    return stopping_.load(std::memory_order_acquire) || native_state_->stopped.load() || bool(native_state_->pending);
+                native_state_->changed.wait_until(lock, next_cycle, [this, processed_sequence] {
+                    return stopping_.load(std::memory_order_acquire) || native_state_->stopped.load() || bool(native_state_->pending) ||
+                           native_state_->sample_sequence.load() != processed_sequence;
                 });
             }
         } catch (const std::exception& error) {
@@ -314,7 +315,7 @@ class GazeboVrpnSystemPlugin final : public gazebo::SystemPlugin {
     std::vector<TrackedModelHandle> tracked_models_;
     double last_scan_wall_time_s_{0.0};
     double next_snapshot_error_log_{0.0};
-    std::chrono::steady_clock::time_point next_capture_time_;
+    SimulationCapturePacer capture_pacer_;
 
     std::mutex snapshot_mutex_;
     ModelStateSnapshot latest_snapshot_;
