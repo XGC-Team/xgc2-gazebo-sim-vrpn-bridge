@@ -21,7 +21,7 @@ Json::Value NativeVrpnExtension::Describe()const{
  result["health"]["tracked_models"]=Json::UInt64(state_->tracked_models.load());result["health"]["sample_sequence"]=Json::UInt64(state_->sample_sequence.load());
  if(!state_->error.empty())result["health"]["error"]=state_->error;
  result["configuration_schema"]["persist_supported"]=false;
- for(auto field:{"port","bind_address"})result["configuration_schema"]["startup_only"].append(field);
+ for(auto field:{"port","bind_address","tracker_ports"})result["configuration_schema"]["startup_only"].append(field);
  result["configuration_schema"]["live_fields"]=Json::arrayValue;
  for(auto field:{"publish_rate","stale_timeout","scan_interval","velocity_filter_cutoff","acceleration_filter_cutoff","derivative_reset_timeout","mocap_noise","delay","auto_mapping","manual_mapping","robots","extrinsics","default_body_to_tracker","trackers","match_mode","auto_track_known_models","mocap_noise_enabled","mocap_noise_seed","delay_enabled","delay_timestamp_policy","delay_seed","enabled_trackers"})result["configuration_schema"]["live_fields"].append(field);
  result["limits"]["configuration_bytes"]=65536;result["limits"]["pending_commands"]=1;
@@ -35,7 +35,7 @@ std::shared_ptr<const xgc2_gazebo_scene::PreparedWorldExtension> NativeVrpnExten
  command->expected_revision=UInt(body["expected_revision"]);
  if(body.isMember("persist")&&(!body["persist"].isBool()||body["persist"].asBool()))throw Error(400,"invalid_argument","native VRPN configuration supports persist:false only");
  if(!body["config"].isObject()||body["config"].empty())throw Error(400,"invalid_argument","VRPN config must be a nonempty object");
- for(auto field:{"port","bind_address"})if(body["config"].isMember(field))throw Error(422,"unsupported",std::string(field)+" is startup-only");
+ for(auto field:{"port","bind_address","tracker_ports"})if(body["config"].isMember(field))throw Error(422,"unsupported",std::string(field)+" is startup-only");
  {std::lock_guard<std::mutex> lock(state_->mutex);command->document=state_->desired;}
  for(const auto& name:body["config"].getMemberNames())command->document[name]=body["config"][name];
  Json::StreamWriterBuilder writer;writer["indentation"]="";if(Json::writeString(writer,command->document).size()>65536)throw Error(429,"resource_exhausted","VRPN configuration exceeds 64 KiB");

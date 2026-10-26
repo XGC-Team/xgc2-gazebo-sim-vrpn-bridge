@@ -2,6 +2,8 @@
 # world component; no ROS parameter server controls this source.
 bind_address: ""
 port: 3883
+# Optional startup-only dedicated listeners keyed by VRPN tracker name.
+# tracker_ports: {uav1: 43001, uav2: 43002}
 publish_rate: 120.0
 scan_interval: 2.0
 stale_timeout: 1.0

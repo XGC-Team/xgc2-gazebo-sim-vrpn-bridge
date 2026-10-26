@@ -14,6 +14,20 @@ libgazebo_sim_vrpn_system_plugin.so. The configuration is a startup grant; no
 ROS NodeHandle, parameter-server lookup, legacy server node or RPC process
 launcher participates. The former vrpn_server.launch is retired.
 
+An optional startup-only `tracker_ports` map opens one additional VRPN
+connection per named tracker, for example `tracker_ports: {uav1: 43001, uav2:
+43002}`. The existing `port` remains the shared observation endpoint. Each
+additional listener sends only its named tracker's pose, velocity and
+acceleration, using the same captured, delayed and noise-processed sample and
+timestamp as the shared endpoint. Names and ports are explicit; ports must be
+unique, valid and different from the shared port. Failure to bind any TCP or
+UDP listener fails the component and releases already opened listeners. With
+no map the existing shared endpoint behavior is unchanged. Use
+`native_world_start --vrpn-tracker-ports '{"uav1":43001,"uav2":43002}'`
+to override the authored map; an empty CLI string preserves it and `{}` clears
+it. The process parameter is `vrpnTrackerPorts` (a JSON object). Clients must
+be configured to use their own dedicated port by the workflow owner.
+
 WorldStartupBinding delays attachment until the already authored world authority
 exists. WorldExtensionBinding registers the domain adapter on the world's one
 SDK endpoint and management worker. NativeComponentBinding becomes ready only
@@ -33,7 +47,7 @@ Mutation body is `{expected_revision:1,persist:false,operation_timeout_ms:5000,
 config:{publish_rate:120}}`. The world host owns the 202 operation receipt,
 request identity, replay and terminal `/v1/operations/{id}/wait`. Native application
 updates desired/applied revisions; persisted is null. Unknown fields, wrong
-JSON types, stale CAS and persistence attempts fail. Port and bind_address are
+JSON types, stale CAS and persistence attempts fail. Port, bind_address and tracker_ports are
 startup-only and cannot rebind a live listener. Structured top-level config
 objects are replaced atomically; scalar fields merge with the authored document.
 Reapplying the same document acknowledges a new revision without resetting
@@ -82,6 +96,7 @@ The existing pure noise, delay, wire-clock and identity tests remain.
 test/server_config_native_test.cpp verifies real authored YAML and strict
 configuration parsing. Earlier isolated native evidence observed one world
 endpoint, actual VRPN listening, public entity position and simulation timestamps,
-CAS and real configuration acknowledgement. No new native execution follows the
-user's hard stop. Updated native-time cache, cleanup and deployment packages
-remain unverified at runtime; no live station is operated.
+CAS and real configuration acknowledgement. `test/native_vrpn_wire.py` with
+`vrpn_wire_reader` exercises the actual Gazebo plugin on an isolated loopback,
+including UDP and TCP wire messages, startup-only configuration, shared sample
+identity, independent reconnect, listener conflicts and shutdown cleanup.

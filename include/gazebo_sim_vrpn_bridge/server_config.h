@@ -23,6 +23,8 @@ struct RobotConfig {
 struct ServerConfig {
     std::string bind_address;
     int port{3883};
+    // Optional dedicated listener per tracker; fixed for this server lifetime.
+    std::map<std::string, int> tracker_ports;
     double publish_rate_hz{100.0};
     double stale_timeout_s{1.0};
     double scan_interval_s{2.0};

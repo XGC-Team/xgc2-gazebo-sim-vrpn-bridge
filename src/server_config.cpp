@@ -181,7 +181,7 @@ class ConfigValues {
  public:
     explicit ConfigValues(Json::Value value):value_(std::move(value)) {
         if (!value_.isObject()) throw std::runtime_error("VRPN configuration must be a mapping");
-        const std::set<std::string> allowed={"bind_address","port","publish_rate","stale_timeout","scan_interval",
+        const std::set<std::string> allowed={"bind_address","port","tracker_ports","publish_rate","stale_timeout","scan_interval",
             "velocity_filter_cutoff","acceleration_filter_cutoff","derivative_reset_timeout","mocap_noise_enabled",
             "mocap_noise_seed","match_mode","trackers","enabled_trackers","default_body_to_tracker","mocap_noise",
             "delay","auto_mapping","robots","manual_mapping","extrinsics","auto_track_known_models","delay_enabled",
@@ -253,6 +253,17 @@ class ServerConfigLoader {
 
   private:
     void loadStructuredConfig() {
+        XmlRpc::XmlRpcValue tracker_ports;
+        if (private_node_.getParam("tracker_ports", tracker_ports)) {
+            if (tracker_ports.getType() != XmlRpc::XmlRpcValue::TypeStruct)
+                throw std::runtime_error("tracker_ports must be a tracker-to-port mapping");
+            for (auto& entry : tracker_ports) {
+                if (entry.second.getType() != XmlRpc::XmlRpcValue::TypeInt)
+                    throw std::runtime_error("tracker_ports." + entry.first + " must be an integer");
+                config_.tracker_ports.emplace(entry.first, static_cast<int>(entry.second));
+            }
+        }
+
         XmlRpc::XmlRpcValue trackers;
         if (private_node_.getParam("trackers", trackers)) {
             config_.tracker_patterns = parseStringList(trackers, "trackers");
@@ -604,6 +615,16 @@ void ServerConfig::validate() const {
     }
     if (port <= 0 || port > 65535) {
         throw std::runtime_error("port must be in range 1..65535");
+    }
+    std::set<int> listener_ports{port};
+    for (const auto& [tracker, tracker_port] : tracker_ports) {
+        if (tracker.empty() || tracker.size() > 256 || tracker != trimSlashes(tracker) ||
+            std::any_of(tracker.begin(), tracker.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; }))
+            throw std::runtime_error("tracker_ports keys must be nonempty canonical tracker names");
+        if (tracker_port < 1 || tracker_port > 65535)
+            throw std::runtime_error("tracker_ports." + tracker + " must be in range 1..65535");
+        if (!listener_ports.insert(tracker_port).second)
+            throw std::runtime_error("tracker_ports listener port conflicts with another VRPN listener");
     }
     for (const std::string& pattern : auto_include_patterns) {
         try {

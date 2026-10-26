@@ -81,7 +81,7 @@ def main(args):
             assert same["state"]=="succeeded" and not same["result"]["effects"]["measurement_state_reset"],same
             stale=mutate(route+"/config",{"expected_revision":1,"persist":False,"config":{"publish_rate":80.}},"PATCH")
             assert stale["state"]=="failed" and stale["error"]["code"]=="conflict",stale
-            for body,code in [({"expected_revision":3,"config":{"misspelled":1}},400),({"expected_revision":3,"persist":True,"config":{"publish_rate":80}},400),({"expected_revision":3,"config":{"port":3884}},422)]:
+            for body,code in [({"expected_revision":3,"config":{"misspelled":1}},400),({"expected_revision":3,"persist":True,"config":{"publish_rate":80}},400),({"expected_revision":3,"config":{"port":3884}},422),({"expected_revision":3,"config":{"tracker_ports":{"uav1":12345}}},422)]:
                 try:client.json(route+"/config",{**body,"operation_timeout_ms":5000},method="PATCH")
                 except Fault as error:assert error.status==code,(code,error.status)
                 else:raise AssertionError("VRPN malformed mutation accepted")

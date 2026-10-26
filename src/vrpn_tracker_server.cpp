@@ -26,6 +26,26 @@ namespace {
 
 constexpr double kTimeEpsilon = 1.0e-9;
 
+struct ConnectionDeleter {
+    void operator()(vrpn_Connection* connection) const {
+        if (connection) connection->removeReference();
+    }
+};
+using ConnectionPtr = std::unique_ptr<vrpn_Connection, ConnectionDeleter>;
+
+ConnectionPtr openListener(const ServerConfig& config, int port) {
+    ConnectionPtr connection(vrpn_create_server_connection(
+        port, nullptr, nullptr, config.bind_address.empty() ? nullptr : config.bind_address.c_str()));
+    if (!connection || !connection->doing_okay())
+        throw std::runtime_error("failed to create VRPN listener on port " + std::to_string(port));
+    return connection;
+}
+
+struct TrackerListener {
+    ConnectionPtr connection; // destroyed after its tracker
+    std::unique_ptr<vrpn_Tracker_Server> tracker;
+};
+
 const char* delayTimestampPolicyName(DelayTimestampPolicy policy) {
     return policy == DelayTimestampPolicy::SampleTime ? "sample_time" : "send_time";
 }
@@ -103,11 +123,14 @@ class VrpnTrackerServer::Impl {
   public:
     explicit Impl(const ServerConfig& config)
         : config_(config), mocap_noise_(config.mocap_noise), measurement_delay_(config.delay) {
-        connection_ = vrpn_create_server_connection(
-            config_.port, nullptr, nullptr, config_.bind_address.empty() ? nullptr : config_.bind_address.c_str());
-        if (connection_ == nullptr || !connection_->doing_okay()) {
-            if (connection_ != nullptr) { connection_->removeReference(); connection_ = nullptr; }
-            throw std::runtime_error("failed to create VRPN server connection");
+        config_.validate();
+        connection_ = openListener(config_, config_.port);
+        for (const auto& [name, port] : config_.tracker_ports) {
+            TrackerListener listener;
+            listener.connection = openListener(config_, port);
+            listener.tracker = std::make_unique<vrpn_Tracker_Server>(name.c_str(), listener.connection.get(), 1);
+            isolated_listeners_.emplace(name, std::move(listener));
+            ROS_INFO_STREAM("[GazeboVrpnServer] Dedicated tracker '" << name << "' on port " << port);
         }
 
         ROS_INFO_STREAM("[GazeboVrpnServer] Serving Gazebo models as VRPN trackers on port "
@@ -138,16 +161,21 @@ class VrpnTrackerServer::Impl {
 
     ~Impl() {
         tracked_models_.clear();
-        if (connection_ != nullptr) {
-            connection_->removeReference();
-            connection_ = nullptr;
-        }
+        isolated_listeners_.clear();
     }
 
-    bool healthy() const { return connection_ != nullptr && connection_->doing_okay(); }
+    bool healthy() const {
+        if (!connection_ || !connection_->doing_okay()) return false;
+        for (const auto& [name, listener] : isolated_listeners_) {
+            (void)name;
+            if (!listener.connection || !listener.connection->doing_okay()) return false;
+        }
+        return true;
+    }
     void applyConfig(const ServerConfig& config) {
         config.validate();
-        if (config.port != config_.port || config.bind_address != config_.bind_address)
+        if (config.port != config_.port || config.bind_address != config_.bind_address ||
+            config.tracker_ports != config_.tracker_ports)
             throw std::runtime_error("VRPN listener binding is startup-only");
         config_ = config;
         mocap_noise_ = MocapNoise(config.mocap_noise);
@@ -238,42 +266,31 @@ class VrpnTrackerServer::Impl {
                 measured_pose.orientation.w,
             };
 
-            const int pose_status = model.tracker->report_pose(0, timestamp, position, quaternion);
-            if (pose_status != 0) {
-                ROS_WARN_COND(wallLogDue(1, 2.0), "[GazeboVrpnServer] Failed to publish VRPN pose for '%s'",
-                                  model.tracker_name.c_str());
-            }
-
-            if (sample->have_velocity) {
-                const vrpn_float64 linear_velocity[3] = {
-                    sample->linear_velocity.x(),
-                    sample->linear_velocity.y(),
-                    sample->linear_velocity.z(),
-                };
-                vrpn_float64 angular_velocity[4]{};
-                vectorRpyToQuaternion(sample->angular_velocity, angular_velocity);
-                const int velocity_status = model.tracker->report_pose_velocity(
-                    0, timestamp, linear_velocity, angular_velocity, sample->report_interval_s);
-                if (velocity_status != 0) {
-                    ROS_WARN_COND(wallLogDue(2, 2.0), "[GazeboVrpnServer] Failed to publish VRPN twist for '%s'",
-                                      model.tracker_name.c_str());
-                }
-            }
-
-            if (sample->have_acceleration) {
-                const vrpn_float64 linear_acceleration[3] = {
-                    sample->linear_acceleration.x(),
-                    sample->linear_acceleration.y(),
-                    sample->linear_acceleration.z(),
-                };
-                vrpn_float64 angular_acceleration[4]{};
-                vectorRpyToQuaternion(sample->angular_acceleration, angular_acceleration);
-                const int acceleration_status = model.tracker->report_pose_acceleration(
-                    0, timestamp, linear_acceleration, angular_acceleration, sample->report_interval_s);
-                if (acceleration_status != 0) {
-                    ROS_WARN_COND(wallLogDue(3, 2.0), "[GazeboVrpnServer] Failed to publish VRPN accel for '%s'",
-                                      model.tracker_name.c_str());
-                }
+            // The two endpoints see the exact same selected sample and time.
+            // Noise and delay selection are performed once above, before fan-out.
+            const vrpn_float64 linear_velocity[3] = {
+                sample->linear_velocity.x(), sample->linear_velocity.y(), sample->linear_velocity.z(),
+            };
+            const vrpn_float64 linear_acceleration[3] = {
+                sample->linear_acceleration.x(), sample->linear_acceleration.y(), sample->linear_acceleration.z(),
+            };
+            vrpn_float64 angular_velocity[4]{}, angular_acceleration[4]{};
+            if (sample->have_velocity) vectorRpyToQuaternion(sample->angular_velocity, angular_velocity);
+            if (sample->have_acceleration) vectorRpyToQuaternion(sample->angular_acceleration, angular_acceleration);
+            const auto isolated = isolated_listeners_.find(model.tracker_name);
+            const std::array<vrpn_Tracker_Server*, 2> outputs = {
+                model.tracker.get(), isolated == isolated_listeners_.end() ? nullptr : isolated->second.tracker.get(),
+            };
+            for (vrpn_Tracker_Server* tracker : outputs) {
+                if (!tracker) continue;
+                if (tracker->report_pose(0, timestamp, position, quaternion) != 0)
+                    ROS_WARN_COND(wallLogDue(1, 2.0), "[GazeboVrpnServer] Failed to publish VRPN pose for '%s'", model.tracker_name.c_str());
+                if (sample->have_velocity && tracker->report_pose_velocity(
+                        0, timestamp, linear_velocity, angular_velocity, sample->report_interval_s) != 0)
+                    ROS_WARN_COND(wallLogDue(2, 2.0), "[GazeboVrpnServer] Failed to publish VRPN twist for '%s'", model.tracker_name.c_str());
+                if (sample->have_acceleration && tracker->report_pose_acceleration(
+                        0, timestamp, linear_acceleration, angular_acceleration, sample->report_interval_s) != 0)
+                    ROS_WARN_COND(wallLogDue(3, 2.0), "[GazeboVrpnServer] Failed to publish VRPN accel for '%s'", model.tracker_name.c_str());
             }
         }
     }
@@ -283,6 +300,11 @@ class VrpnTrackerServer::Impl {
             entry.second.tracker->mainloop();
         }
         connection_->mainloop();
+        for (auto& [name, listener] : isolated_listeners_) {
+            (void)name;
+            listener.tracker->mainloop();
+            listener.connection->mainloop();
+        }
     }
 
     std::size_t trackedModelCount() const { return tracked_models_.size(); }
@@ -367,7 +389,7 @@ class VrpnTrackerServer::Impl {
         model.tracker_name = tracker_name;
         model.body_to_tracker = config_.bodyToTrackerFor(tracker_name);
         model.history.reset(measurement_delay_.historyCapacityForTracker(tracker_name, config_.publish_rate_hz));
-        model.tracker = std::make_unique<vrpn_Tracker_Server>(tracker_name.c_str(), connection_, 1);
+        model.tracker = std::make_unique<vrpn_Tracker_Server>(tracker_name.c_str(), connection_.get(), 1);
 
         ROS_INFO_STREAM("[GazeboVrpnServer] Registered Gazebo model '" << gazebo_model_name << "' as VRPN tracker '"
                                                                        << tracker_name << "'");
@@ -491,7 +513,8 @@ class VrpnTrackerServer::Impl {
     }
 
     ServerConfig config_;
-    vrpn_Connection* connection_{nullptr};
+    ConnectionPtr connection_;
+    std::map<std::string, TrackerListener> isolated_listeners_;
     MocapNoise mocap_noise_;
     MeasurementDelay measurement_delay_;
     std::map<std::string, TrackedModel> tracked_models_;

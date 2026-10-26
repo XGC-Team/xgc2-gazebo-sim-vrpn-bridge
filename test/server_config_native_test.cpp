@@ -17,6 +17,15 @@ int main(int argc,char** argv){
  auto unknown=document;unknown["misspelled"]=1;reject(unknown);
  auto port=document;port["port"]=3883.0;reject(port);
  auto rate=document;rate["publish_rate"]=0;reject(rate);
+ auto mapped=document;mapped["tracker_ports"]["uav1"]=23001;mapped["tracker_ports"]["uav2"]=23002;
+ auto selected=loadServerConfig(mapped);assert(selected.tracker_ports.size()==2 && selected.tracker_ports.at("uav1")==23001);
+ auto duplicate=mapped;duplicate["tracker_ports"]["uav2"]=23001;reject(duplicate);
+ auto shared=mapped;shared["tracker_ports"]["uav2"]=3883;reject(shared);
+ auto invalid=mapped;invalid["tracker_ports"]["uav1"]=0;reject(invalid);
+ invalid=mapped;invalid["tracker_ports"]["uav1"]=true;reject(invalid);
+ invalid=mapped;invalid["tracker_ports"]["uav1"]=23001.0;reject(invalid);
+ invalid=document;invalid["tracker_ports"]=Json::arrayValue;reject(invalid);
+ invalid=mapped;invalid["tracker_ports"]["/bad"]=23003;reject(invalid);
  auto mapping=document;mapping["auto_track_known_models"]=true;
  assert(loadServerConfig(mapping).trackerNameForGazeboModel("uav1")=="uav1");
  assert(loadServerConfig(mapping).trackerNameForGazeboModel("not_a_robot").empty());
